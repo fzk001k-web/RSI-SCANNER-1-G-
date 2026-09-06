@@ -1,0 +1,278 @@
+//@version=6
+indicator("AUTO RSI TREND - Kusursuz Sağdan Sola Pivot", overlay=false, max_lines_count=100, max_labels_count=200)
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// AYARLAR
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+grpR = "RSI Ayarları"
+rsiLength = input.int(14, "RSI Uzunluğu", minval=2, group=grpR)
+rsiSource = input.source(close, "RSI Kaynak", group=grpR)
+showRsiMa = input.bool(true, "RSI Ortalamasını Göster", group=grpR)
+rsiMaLength = input.int(14, "RSI Ortalama Uzunluğu", minval=2, group=grpR)
+
+grpT = "RSI Auto Trend"
+leftBars = input.int(3, "Pivot Sol", minval=2, maxval=12, group=grpT)
+rightBars = input.int(3, "Pivot Sağ", minval=2, maxval=12, group=grpT)
+maxPivots = input.int(35, "Bakılacak En Fazla Pivot", minval=6, maxval=80, group=grpT)
+minTouches = input.int(4, "Minimum Pivot Teması", minval=2, maxval=10, group=grpT)
+maxNumberedTouches = input.int(8, "Numaralanacak En Fazla Temas", minval=2, maxval=15, group=grpT)
+touchTolerance = input.float(1.20, "Temas Toleransı (RSI Puan)", minval=0.10, step=0.10, group=grpT)
+breakTolerance = input.float(0.20, "Kırılım Toleransı (RSI Puan)", minval=0.0, step=0.05, group=grpT)
+maxLineDistance = input.float(18.0, "Çizginin RSI'a Maks. Uzaklığı", minval=3.0, step=0.5, group=grpT)
+breakConfirmBars = input.int(1, "Kırılım Geçerlilik Mumu", minval=0, maxval=5, group=grpT)
+
+grpS = "Sinyal"
+minimumBreakRsi = input.float(50.0, "Kırılımda Minimum RSI", minval=1, maxval=99, step=0.5, group=grpS)
+requireRsiRising = input.bool(true, "RSI Yükseliyor Olsun", group=grpS)
+showSignal = input.bool(true, "Kırılım Sinyalini Göster", group=grpS)
+trendColor = input.color(color.rgb(170, 35, 205), "Trend Rengi", group=grpS)
+supportTrendColor = input.color(color.aqua, "Alt Trend Rengi", group=grpS)
+signalColor = input.color(color.lime, "Sinyal Rengi", group=grpS)
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// RSI
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+rsi = ta.rsi(rsiSource, rsiLength)
+rsiMa = ta.ema(rsi, rsiMaLength)
+
+plot(rsi, "RSI", color=color.rgb(105, 75, 225), linewidth=1)
+plot(showRsiMa ? rsiMa : na, "RSI EMA", color=color.orange, linewidth=1)
+h70 = hline(70, "70", color=color.new(color.gray, 45), linestyle=hline.style_dashed)
+h50 = hline(50, "50", color=color.new(color.gray, 45), linestyle=hline.style_dashed)
+h30 = hline(30, "30", color=color.new(color.gray, 45), linestyle=hline.style_dashed)
+fill(h70, h30, color=color.new(color.purple, 94), title="RSI Bölgesi")
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// RSI PİVOT TEPELERİ
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+pivotHigh = ta.pivothigh(rsi, leftBars, rightBars)
+pivotLow = ta.pivotlow(rsi, leftBars, rightBars)
+var float[] highPrices = array.new_float()
+var int[] highBars = array.new_int()
+var float[] lowPrices = array.new_float()
+var int[] lowBars = array.new_int()
+newHighPivot = false
+newLowPivot = false
+
+if not na(pivotHigh)
+    array.push(highPrices, pivotHigh)
+    array.push(highBars, bar_index - rightBars)
+    newHighPivot := true
+
+if not na(pivotLow)
+    array.push(lowPrices, pivotLow)
+    array.push(lowBars, bar_index - rightBars)
+    newLowPivot := true
+
+while array.size(highPrices) > maxPivots
+    array.shift(highPrices)
+    array.shift(highBars)
+
+while array.size(lowPrices) > maxPivots
+    array.shift(lowPrices)
+    array.shift(lowBars)
+
+// dir=1: üst direnç, dir=-1: alt destek.
+// En çok teması olan ve pivotlar tarafından henüz bozulmamış çizgiyi seçer.
+f_findBestTrend(float[] prices, int[] bars, int dir) =>
+    int bestI = -1
+    int bestJ = -1
+    int bestTouches = 0
+    float bestScore = na
+    int n = array.size(prices)
+
+    if n >= minTouches
+        for i = 0 to n - 2
+            p1 = array.get(prices, i)
+            b1 = array.get(bars, i)
+            for j = i + 1 to n - 1
+                p2 = array.get(prices, j)
+                b2 = array.get(bars, j)
+                slope = (p2 - p1) / math.max(b2 - b1, 1)
+
+                slopeOk = dir == 1 ? p2 <= p1 + touchTolerance : p2 >= p1 - touchTolerance
+                if slopeOk
+                    touches = 0
+                    errorSum = 0.0
+                    broken = false
+
+                    for k = i to n - 1
+                        pk = array.get(prices, k)
+                        bk = array.get(bars, k)
+                        lineValue = p1 + slope * (bk - b1)
+                        distance = math.abs(pk - lineValue)
+
+                        brokenAbove = dir == 1 and pk > lineValue + touchTolerance
+                        brokenBelow = dir == -1 and pk < lineValue - touchTolerance
+                        if brokenAbove or brokenBelow
+                            broken := true
+                            break
+
+                        if distance <= touchTolerance
+                            touches += 1
+                            errorSum += distance
+
+                    currentLineValue = p1 + slope * (bar_index - b1)
+                    closeEnough = math.abs(rsi - currentLineValue) <= maxLineDistance
+                    // Önce temas sayısı, sonra uzunluk, sonra temiz temas kalitesi.
+                    score = touches * 10000.0 + (b2 - b1) - errorSum * 10.0
+
+                    if not broken and closeEnough and touches >= minTouches and (na(bestScore) or score > bestScore)
+                        bestScore := score
+                        bestI := i
+                        bestJ := j
+                        bestTouches := touches
+
+    [bestI, bestJ, bestTouches]
+
+f_lineValue(int x1, float y1, int x2, float y2, int x) =>
+    x2 != x1 ? y1 + (y2 - y1) / (x2 - x1) * (x - x1) : y2
+
+f_clearLabels(label[] labels) =>
+    while array.size(labels) > 0
+        label.delete(array.pop(labels))
+
+// Sağdan sola: güncel çizgi izdüşümü 1, en yeni pivot 2, daha eskiler 3, 4...
+f_drawRightToLeftNumbers(float[] prices, int[] bars, int startIndex, int x1, float y1, int x2, float y2, color numberColor, label[] labels) =>
+    f_clearLabels(labels)
+    int number = 2
+    int n = array.size(prices)
+
+    if n > startIndex
+        for offset = 0 to n - startIndex - 1
+            k = n - 1 - offset
+            pk = array.get(prices, k)
+            bk = array.get(bars, k)
+            projected = f_lineValue(x1, y1, x2, y2, bk)
+
+            if math.abs(pk - projected) <= touchTolerance and number <= maxNumberedTouches
+                array.push(labels, label.new(bk, pk, str.tostring(number), style=label.style_none,
+                     textcolor=numberColor, size=size.small))
+                number += 1
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// TREND ÇİZGİSİ
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+var line resistanceLine = na
+var line supportLine = na
+var label currentResistanceLabel = na
+var label currentSupportLabel = na
+var label[] resistanceLabels = array.new_label()
+var label[] supportLabels = array.new_label()
+var int resistanceTouches = 0
+var int supportTouches = 0
+
+if newHighPivot
+    [bestI, bestJ, touches] = f_findBestTrend(highPrices, highBars, 1)
+    resistanceTouches := touches
+
+    if bestI >= 0 and bestJ >= 0
+        x1 = array.get(highBars, bestI)
+        y1 = array.get(highPrices, bestI)
+        x2 = array.get(highBars, bestJ)
+        y2 = array.get(highPrices, bestJ)
+
+        if not na(resistanceLine)
+            line.delete(resistanceLine)
+
+        resistanceLine := line.new(x1, y1, x2, y2, extend=extend.right,
+             color=trendColor, width=2)
+        f_drawRightToLeftNumbers(highPrices, highBars, bestI, x1, y1, x2, y2, color.lime, resistanceLabels)
+    else if not na(resistanceLine)
+        oldValue = line.get_price(resistanceLine, bar_index)
+        line.set_xy2(resistanceLine, bar_index, oldValue)
+        line.set_extend(resistanceLine, extend.none)
+        resistanceLine := na
+
+if newLowPivot
+    [bestI, bestJ, touches] = f_findBestTrend(lowPrices, lowBars, -1)
+    supportTouches := touches
+
+    if bestI >= 0 and bestJ >= 0
+        x1 = array.get(lowBars, bestI)
+        y1 = array.get(lowPrices, bestI)
+        x2 = array.get(lowBars, bestJ)
+        y2 = array.get(lowPrices, bestJ)
+
+        if not na(supportLine)
+            line.delete(supportLine)
+
+        supportLine := line.new(x1, y1, x2, y2, extend=extend.right,
+             color=supportTrendColor, width=2)
+        f_drawRightToLeftNumbers(lowPrices, lowBars, bestI, x1, y1, x2, y2, color.orange, supportLabels)
+    else if not na(supportLine)
+        oldValue = line.get_price(supportLine, bar_index)
+        line.set_xy2(supportLine, bar_index, oldValue)
+        line.set_extend(supportLine, extend.none)
+        supportLine := na
+
+resistanceNow = not na(resistanceLine) ? line.get_price(resistanceLine, bar_index) : na
+resistancePrevious = not na(resistanceLine) ? line.get_price(resistanceLine, bar_index - 1) : na
+supportNow = not na(supportLine) ? line.get_price(supportLine, bar_index) : na
+supportPrevious = not na(supportLine) ? line.get_price(supportLine, bar_index - 1) : na
+
+// Kırılan, RSI ölçeğinin dışına çıkan veya güncel RSI'dan fazla uzaklaşan çizgi
+// kırılım/geçersizlik barında durur. Sağdaki trendsiz alana uzamaz.
+resistanceBreakEvent = not na(resistanceNow) and not na(resistancePrevious) and
+     rsi > resistanceNow + breakTolerance and rsi[1] <= resistancePrevious + breakTolerance
+supportBreakEvent = not na(supportNow) and not na(supportPrevious) and
+     rsi < supportNow - breakTolerance and rsi[1] >= supportPrevious - breakTolerance
+
+linesCrossed = not na(resistanceNow) and not na(supportNow) and supportNow >= resistanceNow
+resistanceInvalid = not na(resistanceNow) and (resistanceNow < 0 or resistanceNow > 100 or math.abs(rsi - resistanceNow) > maxLineDistance)
+supportInvalid = not na(supportNow) and (supportNow < 0 or supportNow > 100 or math.abs(rsi - supportNow) > maxLineDistance)
+
+if not na(resistanceLine) and (resistanceBreakEvent or resistanceInvalid or linesCrossed)
+    line.set_xy2(resistanceLine, bar_index, resistanceNow)
+    line.set_extend(resistanceLine, extend.none)
+    resistanceLine := na
+    if not na(currentResistanceLabel)
+        label.delete(currentResistanceLabel)
+        currentResistanceLabel := na
+
+if not na(supportLine) and (supportBreakEvent or supportInvalid or linesCrossed)
+    line.set_xy2(supportLine, bar_index, supportNow)
+    line.set_extend(supportLine, extend.none)
+    supportLine := na
+    if not na(currentSupportLabel)
+        label.delete(currentSupportLabel)
+        currentSupportLabel := na
+
+if barstate.islast
+    if not na(currentResistanceLabel)
+        label.delete(currentResistanceLabel)
+    if not na(currentSupportLabel)
+        label.delete(currentSupportLabel)
+    if not na(resistanceLine)
+        currentResistanceLabel := label.new(bar_index, line.get_price(resistanceLine, bar_index), "1", style=label.style_none,
+             textcolor=color.lime, size=size.small)
+    if not na(supportLine)
+        currentSupportLabel := label.new(bar_index, line.get_price(supportLine, bar_index), "1", style=label.style_none,
+             textcolor=color.orange, size=size.small)
+
+activeResistance = not na(resistanceLine) ? line.get_price(resistanceLine, bar_index) : na
+activeSupport = not na(supportLine) ? line.get_price(supportLine, bar_index) : na
+plot(activeResistance, "Güncel RSI Direnci", color=color.new(trendColor, 100), display=display.data_window)
+plot(activeSupport, "Güncel RSI Desteği", color=color.new(supportTrendColor, 100), display=display.data_window)
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// RSI TREND KIRILIMI
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+breakAge = ta.barssince(resistanceBreakEvent)
+breakRecent = not na(breakAge) and breakAge <= breakConfirmBars
+rsiLevelOk = rsi >= minimumBreakRsi
+rsiDirectionOk = not requireRsiRising or rsi > rsi[1]
+buySignal = barstate.isconfirmed and showSignal and breakRecent and rsiLevelOk and rsiDirectionOk
+newBuySignal = buySignal and not buySignal[1]
+
+plotshape(newBuySignal, title="RSI TREND KIRILIM", style=shape.labelup,
+     location=location.bottom, text="RSI\nKIRILIM", color=signalColor,
+     textcolor=color.black, size=size.small)
+bgcolor(newBuySignal ? color.new(signalColor, 86) : na)
+
+alertcondition(newBuySignal, title="RSI Auto Trend Kırılım",
+     message="{{ticker}} RSI, en fazla pivot temaslı direnci 50 üzerinde yukarı kırdı. RSI={{plot_0}}")
+
+// Veri penceresi
+plot(resistanceTouches, "Trend Temas Sayısı", display=display.data_window)
+plot(supportTouches, "Alt Trend Temas Sayısı", display=display.data_window)

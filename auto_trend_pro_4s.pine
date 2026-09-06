@@ -1,0 +1,554 @@
+//@version=5
+indicator("AUTO TREND PRO", overlay=true, max_lines_count=80, max_labels_count=80)
+
+
+// AYARLAR
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+grpG = "Hizli Trend Ayarlari"
+leftBars  = input.int(5, "Pivot Sol", minval=2, maxval=12, group=grpG)
+rightBars = input.int(5, "Pivot Sag", minval=2, maxval=12, group=grpG)
+mainPivots = input.int(35, "Ana Trend Pivot Sayisi", minval=8, maxval=35, group=grpG)
+midPivots  = input.int(12, "Ara Trend Pivot Sayisi", minval=6, maxval=24, group=grpG)
+minTouchMain = input.int(4, "Ana Trend Min Temas", minval=4, maxval=8, group=grpG)
+minTouchMid  = input.int(4, "Ara Trend Min Temas", minval=4, maxval=6, group=grpG)
+tolPct = input.float(0.95, "Trend Temas Toleransi %", minval=0.05, step=0.05, group=grpG)
+strictTouchPct = input.float(0.15, "Gercek Temas Maks Uzaklik %", minval=0.01, maxval=0.50, step=0.01, group=grpG)
+maxAtrDistance = input.float(9.0, "Cizgi Maks Uzaklik ATR", minval=2.0, maxval=30.0, step=0.5, group=grpG)
+
+grpD = "Trend Cizgileri"
+showMain = input.bool(true, "Ana Trendleri Goster", group=grpD)
+mainResColor = input.color(color.red, "Ana Direnc Rengi", group=grpD)
+mainSupColor = input.color(color.aqua, "Ana Destek Rengi", group=grpD)
+mainResWidth = input.int(3, "Ana Direnc Kalinlik", minval=1, maxval=5, group=grpD)
+mainSupWidth = input.int(3, "Ana Destek Kalinlik", minval=1, maxval=5, group=grpD)
+mainResStyleOpt = input.string("Duz", "Ana Direnc Model", options=["Duz", "Kesik", "Noktali"], group=grpD)
+mainSupStyleOpt = input.string("Duz", "Ana Destek Model", options=["Duz", "Kesik", "Noktali"], group=grpD)
+
+showMid = input.bool(true, "Ara Trendleri Goster", group=grpD)
+midResColor = input.color(color.purple, "Ara Direnc Rengi", group=grpD)
+midSupColor = input.color(color.orange, "Ara Destek Rengi", group=grpD)
+midResWidth = input.int(2, "Ara Direnc Kalinlik", minval=1, maxval=5, group=grpD)
+midSupWidth = input.int(2, "Ara Destek Kalinlik", minval=1, maxval=5, group=grpD)
+midResStyleOpt = input.string("Kesik", "Ara Direnc Model", options=["Duz", "Kesik", "Noktali"], group=grpD)
+midSupStyleOpt = input.string("Kesik", "Ara Destek Model", options=["Duz", "Kesik", "Noktali"], group=grpD)
+
+grpH = "Ara Yatay Destek"
+showHorizontalSup = input.bool(true, "Ara Yatay Destek Goster", group=grpH)
+hSupColor = input.color(color.new(color.teal, 0), "Yatay Destek Rengi", group=grpH)
+hSupWidth = input.int(2, "Yatay Destek Kalinlik", minval=1, maxval=5, group=grpH)
+hSupStyleOpt = input.string("Kesik", "Yatay Destek Model", options=["Duz", "Kesik", "Noktali"], group=grpH)
+hSupMinTouch = input.int(2, "Yatay Destek Min Temas", minval=2, maxval=8, group=grpH)
+hSupTolPct = input.float(0.45, "Yatay Destek Tolerans %", minval=0.05, step=0.05, group=grpH)
+hSupMaxAtrBelow = input.float(7.0, "Maks Uzaklik ATR", minval=1.0, maxval=25.0, step=0.5, group=grpH)
+
+grpB = "BUY"
+showBuy = input.bool(true, "BUY Goster", group=grpB)
+buyColor = input.color(color.lime, "BUY Etiket Rengi", group=grpB)
+buyTextColor = input.color(color.black, "BUY Yazi Rengi", group=grpB)
+minBodyPct = input.float(45.0, "Min Govde %", minval=1, maxval=100, group=grpB)
+minBreakPct = input.float(50.0, "Trend Ustu Mum %", minval=1, maxval=100, group=grpB)
+useRsi = input.bool(true, "RSI Filtresi", group=grpB)
+rsiMin = input.int(50, "RSI Min", minval=1, maxval=99, group=grpB)
+useMacd = input.bool(true, "MACD Filtresi", group=grpB)
+useEma = input.bool(true, "EMA20 Ustu Bilgisini Goster", group=grpB)
+emaCrossMaxBars = input.int(8, "EMA5/9 Kesisim Gecerli Mum", minval=0, maxval=20, group=grpB)
+trendBreakConfirmBars = input.int(3, "Trend Kirilim Teyit Suresi", minval=0, maxval=8, group=grpB)
+bbLength = input.int(20, "BB Uzunluk", minval=5, group=grpB)
+bbMult = input.float(2.0, "BB Carpani", minval=0.5, step=0.1, group=grpB)
+bbSqueezeLookback = input.int(50, "BB Daralma Bakis", minval=20, group=grpB)
+bbSqueezePercentile = input.int(20, "BB En Dar Yuzdelik", minval=5, maxval=50, group=grpB)
+bbSqueezeSlack = input.float(15.0, "BB Esik Toleransi %", minval=0, maxval=50, group=grpB)
+
+grpM = "MACD / Momentum"
+macdFastLength = input.int(11, "MACD Hizli Uzunluk", minval=1, group=grpM)
+macdSlowLength = input.int(24, "MACD Yavas Uzunluk", minval=2, group=grpM)
+macdSignalLength = input.int(7, "MACD Sinyal Uzunlugu", minval=1, group=grpM)
+macdCrossLookback = input.int(8, "MACD 0 Ustu Kesisim Bakilacak Mum", minval=1, maxval=50, group=grpM)
+momentumLookback = input.int(5, "Momentum Kirilim Gecerli Mum", minval=1, maxval=30, group=grpM)
+
+grpV = "Hacim Filtresi"
+volumeSmaLength = input.int(20, "Hacim SMA Uzunlugu", minval=1, group=grpV)
+volumeMultiplier = input.float(1.5, "Hacim SMA Carpani", minval=0.1, step=0.1, group=grpV)
+
+grpS = "SELL"
+showSell = input.bool(true, "SELL Goster", group=grpS)
+sellColor = input.color(color.red, "SELL Etiket Rengi", group=grpS)
+sellTextColor = input.color(color.white, "SELL Yazi Rengi", group=grpS)
+
+grpEMA = "EMA Ayarlari"
+ema5Length = input.int(5, "EMA 5 Degeri", minval=1, maxval=500, group=grpEMA)
+ema9Length = input.int(9, "EMA 9 Degeri", minval=1, maxval=500, group=grpEMA)
+ema20Length = input.int(20, "EMA 20 Degeri", minval=1, maxval=500, group=grpEMA)
+ema5Color = input.color(color.orange, "EMA 5 Rengi", group=grpEMA)
+ema9Color = input.color(color.purple, "EMA 9 Rengi", group=grpEMA)
+ema20Color = input.color(color.new(color.yellow, 15), "EMA 20 Rengi", group=grpEMA)
+
+grpDash = "Dashboard"
+showDash = input.bool(true, "Panel Goster", group=grpDash)
+dashPosOpt = input.string("Sol Alt", "Panel Konumu", options=["Sag Ust", "Sag Alt", "Sol Ust", "Sol Alt"], group=grpDash)
+dashSizeOpt = input.string("Kucuk", "Panel Boyutu", options=["Cok Kucuk", "Kucuk", "Normal"], group=grpDash)
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// TEMEL HESAPLAR
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+atr = ta.atr(14)
+ema20 = ta.ema(close, ema20Length)
+ema5 = ta.ema(close, ema5Length)
+ema9 = ta.ema(close, ema9Length)
+rsi = ta.rsi(close, 14)
+[macd, signal, hist] = ta.macd(close, macdFastLength, macdSlowLength, macdSignalLength)
+volumeSma = ta.sma(volume, volumeSmaLength)
+volumeOk = volume >= volumeSma * volumeMultiplier
+
+plot(ema20, "EMA20", color=ema20Color, linewidth=1)
+plot(ema5, "EMA5", color=ema5Color, linewidth=2)
+plot(ema9, "EMA9", color=ema9Color, linewidth=2)
+
+rng = high - low
+body = math.abs(close - open)
+upperWick = high - math.max(open, close)
+lowerWick = math.min(open, close) - low
+
+bodyPct = rng > 0 ? body / rng * 100.0 : 0.0
+upperPct = rng > 0 ? upperWick / rng * 100.0 : 0.0
+lowerPct = rng > 0 ? lowerWick / rng * 100.0 : 0.0
+
+bodyOk = close > open and bodyPct >= minBodyPct
+sellBodyOk = close < open and bodyPct >= minBodyPct
+rsiOk = not useRsi or rsi >= rsiMin
+sellRsiOk = not useRsi or rsi <= 50
+macdBullCross = ta.crossover(macd, signal)
+macdBearCross = ta.crossunder(macd, signal)
+macdOk = not useMacd or (macdBullCross and macd >= 0 and hist > 0)
+sellMacdOk = not useMacd or (macdBearCross and macd <= 0 and hist < 0)
+ema5x9Bars = ta.barssince(ta.crossover(ema5, ema9))
+ema5x9Ok = not na(ema5x9Bars) and ema5x9Bars <= emaCrossMaxBars
+ema5x9DownBars = ta.barssince(ta.crossunder(ema5, ema9))
+ema5x9DownOk = not na(ema5x9DownBars) and ema5x9DownBars <= emaCrossMaxBars
+ema20Above = close > ema20
+ema20Below = close < ema20
+baseBuyOk = bodyOk and rsiOk and macdOk and ema5x9Ok and volumeOk
+baseSellOk = sellBodyOk and sellRsiOk and sellMacdOk and ema5x9DownOk and volumeOk
+bbBasis = ta.sma(close, bbLength)
+bbDev = ta.stdev(close, bbLength) * bbMult
+bbUpper = bbBasis + bbDev
+bbLower = bbBasis - bbDev
+bbWidth = bbBasis != 0 ? (bbUpper - bbLower) / bbBasis : na
+bbNarrowThreshold = ta.percentile_nearest_rank(bbWidth[1], bbSqueezeLookback, bbSqueezePercentile)
+bbSqueezeBefore = not na(bbWidth[1]) and not na(bbNarrowThreshold) and bbWidth[1] <= bbNarrowThreshold * (1 + bbSqueezeSlack / 100.0)
+
+f_style(string s) =>
+    s == "Kesik" ? line.style_dashed : s == "Noktali" ? line.style_dotted : line.style_solid
+
+f_dashPos(string s) =>
+    s == "Sag Ust" ? position.top_right : s == "Sag Alt" ? position.bottom_right : s == "Sol Ust" ? position.top_left : position.bottom_left
+
+f_txtSize(string s) =>
+    s == "Cok Kucuk" ? size.tiny : s == "Normal" ? size.normal : size.small
+
+dashTextSize = f_txtSize(dashSizeOpt)
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// MACD COKLU ZAMAN
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+f_macdLine() =>
+    [m, s, h] = ta.macd(close, macdFastLength, macdSlowLength, macdSignalLength)
+    m
+
+f_macdCrossRecent(int barsBack) =>
+    [m, s, h] = ta.macd(close, macdFastLength, macdSlowLength, macdSignalLength)
+    bs = ta.barssince(ta.crossover(m, 0))
+    not na(bs) and bs <= barsBack
+
+macd15Cross0 = request.security(syminfo.tickerid, "15", f_macdCrossRecent(macdCrossLookback), lookahead=barmerge.lookahead_off)
+macd1hCross0 = request.security(syminfo.tickerid, "60", f_macdCrossRecent(macdCrossLookback), lookahead=barmerge.lookahead_off)
+macd1h = request.security(syminfo.tickerid, "60", f_macdLine(), lookahead=barmerge.lookahead_off)
+macd4h = request.security(syminfo.tickerid, "240", f_macdLine(), lookahead=barmerge.lookahead_off)
+
+macd1hAbove0 = macd1h > 0
+macd4hAbove0 = macd4h > 0
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// PIVOT DIZILERI
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ph = ta.pivothigh(high, leftBars, rightBars)
+pl = ta.pivotlow(low, leftBars, rightBars)
+
+var float[] hP = array.new_float()
+var int[] hB = array.new_int()
+var float[] lP = array.new_float()
+var int[] lB = array.new_int()
+
+newPivot = false
+
+if not na(ph)
+    array.push(hP, ph)
+    array.push(hB, bar_index - rightBars)
+    newPivot := true
+
+if not na(pl)
+    array.push(lP, pl)
+    array.push(lB, bar_index - rightBars)
+    newPivot := true
+
+while array.size(hP) > mainPivots
+    array.shift(hP)
+    array.shift(hB)
+
+while array.size(lP) > mainPivots
+    array.shift(lP)
+    array.shift(lB)
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// TREND BULMA
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+f_findTrend(float[] ps, int[] bs, int startIdx, int dir, int minTouch) =>
+    int bestI = -1
+    int bestJ = -1
+    int bestT = 0
+    float bestScore = na
+    int n = array.size(ps)
+
+    // 1 numara pivot degil, cizginin guncel bar/kirilim temasidir.
+    // Bu nedenle gecmiste en az (minTouch-1) pivot temasi bulunan en temiz cizgiyi arariz.
+    historicalMin = math.max(3, minTouch - 1)
+    if n - startIdx >= historicalMin
+        for i = startIdx to n - 2
+            p1 = array.get(ps, i)
+            b1 = array.get(bs, i)
+            for j = i + 1 to n - 1
+                p2 = array.get(ps, j)
+                b2 = array.get(bs, j)
+                slope = (p2 - p1) / math.max(b2 - b1, 1)
+                slopeOk = dir == 1 ? p2 <= p1 * (1 + tolPct / 100.0) : p2 >= p1 * (1 - tolPct / 100.0)
+                if slopeOk
+                    touches = 0
+                    errSum = 0.0
+                    broken = false
+                    for k = i to n - 1
+                        pk = array.get(ps, k)
+                        bk = array.get(bs, k)
+                        lp = p1 + slope * (bk - b1)
+                        breakTol = math.abs(lp) * tolPct / 100.0
+                        touchTol = math.abs(lp) * strictTouchPct / 100.0
+                        err = math.abs(pk - lp)
+                        if dir == 1 and pk > lp + breakTol
+                            broken := true
+                            break
+                        if dir == -1 and pk < lp - breakTol
+                            broken := true
+                            break
+                        if err <= touchTol
+                            touches += 1
+                            errSum += touchTol > 0 ? err / touchTol : 0.0
+                    nowPrice = p1 + slope * (bar_index - b1)
+                    nearScore = -math.abs(close - nowPrice) / math.max(atr, syminfo.mintick)
+                    score = touches * 1000 + (b2 - b1) * 0.20 + nearScore - errSum
+                    goodDistance = math.abs(close - nowPrice) <= atr * maxAtrDistance
+                    if not broken and goodDistance and touches >= historicalMin and (na(bestScore) or score > bestScore)
+                        bestScore := score
+                        bestI := i
+                        bestJ := j
+                        bestT := touches + 1
+
+    [bestI, bestJ, bestT]
+
+f_clearLabels(label[] labels) =>
+    while array.size(labels) > 0
+        label.delete(array.pop(labels))
+
+f_drawTouchNumbers(float[] ps, int[] bs, int startIdx, int x1, float y1, int x2, float y2, color col, label[] labels) =>
+    f_clearLabels(labels)
+    // Gecmis pivotlar 2'den baslar; 1 etiketi guncel cizgi temasina ayrilir.
+    int number = 2
+    int n = array.size(ps)
+    if n > startIdx
+        for rev = 0 to n - startIdx - 1
+            k = n - 1 - rev
+            pk = array.get(ps, k)
+            bk = array.get(bs, k)
+            lp = x2 != x1 ? y1 + (y2 - y1) / (x2 - x1) * (bk - x1) : y2
+            touchTol = math.abs(lp) * strictTouchPct / 100.0
+            if math.abs(pk - lp) <= touchTol and number <= 6
+                array.push(labels, label.new(bk, pk, str.tostring(number), style=label.style_none, textcolor=col, size=size.small))
+                number += 1
+
+f_findHorizontalSupport(float[] ps, int[] bs, int startIdx, int minTouch) =>
+    int bestFirst = -1
+    float bestLevel = na
+    int bestTouches = 0
+    float bestScore = na
+    int n = array.size(ps)
+
+    if n - startIdx >= minTouch
+        for i = startIdx to n - 1
+            lvl = array.get(ps, i)
+            tol = math.abs(lvl) * hSupTolPct / 100.0
+            touches = 0
+            firstBar = array.get(bs, i)
+
+            for k = startIdx to n - 1
+                pk = array.get(ps, k)
+                bk = array.get(bs, k)
+                if math.abs(pk - lvl) <= tol
+                    touches += 1
+                    firstBar := math.min(firstBar, bk)
+
+            belowClose = lvl <= close
+            nearEnough = math.abs(close - lvl) <= atr * hSupMaxAtrBelow
+            score = touches * 1000 - math.abs(close - lvl) / math.max(atr, syminfo.mintick)
+
+            if belowClose and nearEnough and touches >= minTouch and (na(bestScore) or score > bestScore)
+                bestScore := score
+                bestLevel := lvl
+                bestTouches := touches
+                bestFirst := firstBar
+
+    [bestFirst, bestLevel, bestTouches]
+
+f_price(int x1, float y1, int x2, float y2, int x) =>
+    x2 != x1 ? y1 + (y2 - y1) / (x2 - x1) * (x - x1) : y2
+
+f_sameLine(int x1, float y1, int x2, float y2, line ln) =>
+    if na(ln)
+        false
+    else
+        p = f_price(x1, y1, x2, y2, bar_index)
+        e = line.get_price(ln, bar_index)
+        not na(e) and math.abs(p - e) <= atr * 0.30
+
+f_breakPct(float trendPrice) =>
+    rng > 0 and not na(trendPrice) ? (high - math.max(low, trendPrice)) / rng * 100.0 : 0.0
+
+f_breakDownPct(float trendPrice) =>
+    rng > 0 and not na(trendPrice) ? (math.min(high, trendPrice) - low) / rng * 100.0 : 0.0
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// CIZGILER
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+var line mainRes = na
+var line mainSup = na
+var line midRes = na
+var line midSup = na
+var line hSup = na
+var label[] mainResLabels = array.new_label()
+var label[] mainSupLabels = array.new_label()
+var label mainResNowLabel = na
+var label mainSupNowLabel = na
+
+var int mainResT = 0
+var int mainSupT = 0
+var int midResT = 0
+var int midSupT = 0
+var int hSupT = 0
+
+if newPivot
+    [ri, rj, rt] = f_findTrend(hP, hB, 0, 1, minTouchMain)
+    mainResT := rt
+
+    if showMain and ri >= 0 and rj >= 0
+        x1 = array.get(hB, ri)
+        y1 = array.get(hP, ri)
+        x2 = array.get(hB, rj)
+        y2 = array.get(hP, rj)
+
+        if not na(mainRes)
+            line.delete(mainRes)
+
+        mainRes := line.new(x1, y1, x2, y2, extend=extend.right, color=mainResColor, width=mainResWidth, style=f_style(mainResStyleOpt))
+        f_drawTouchNumbers(hP, hB, ri, x1, y1, x2, y2, mainResColor, mainResLabels)
+
+    [si, sj, st] = f_findTrend(lP, lB, 0, -1, minTouchMain)
+    mainSupT := st
+
+    if showMain and si >= 0 and sj >= 0
+        x1 = array.get(lB, si)
+        y1 = array.get(lP, si)
+        x2 = array.get(lB, sj)
+        y2 = array.get(lP, sj)
+
+        if not na(mainSup)
+            line.delete(mainSup)
+
+        mainSup := line.new(x1, y1, x2, y2, extend=extend.right, color=mainSupColor, width=mainSupWidth, style=f_style(mainSupStyleOpt))
+        f_drawTouchNumbers(lP, lB, si, x1, y1, x2, y2, mainSupColor, mainSupLabels)
+
+    startH = math.max(0, array.size(hP) - midPivots)
+    [mri, mrj, mrt] = f_findTrend(hP, hB, startH, 1, minTouchMid)
+    midResT := mrt
+
+    if showMid and mri >= 0 and mrj >= 0
+        x1 = array.get(hB, mri)
+        y1 = array.get(hP, mri)
+        x2 = array.get(hB, mrj)
+        y2 = array.get(hP, mrj)
+
+        if not na(midRes)
+            line.delete(midRes)
+
+        if not f_sameLine(x1, y1, x2, y2, mainRes)
+            midRes := line.new(x1, y1, x2, y2, extend=extend.right, color=midResColor, width=midResWidth, style=f_style(midResStyleOpt))
+
+    startL = math.max(0, array.size(lP) - midPivots)
+    [msi, msj, mst] = f_findTrend(lP, lB, startL, -1, minTouchMid)
+    midSupT := mst
+
+    if showMid and msi >= 0 and msj >= 0
+        x1 = array.get(lB, msi)
+        y1 = array.get(lP, msi)
+        x2 = array.get(lB, msj)
+        y2 = array.get(lP, msj)
+
+        if not na(midSup)
+            line.delete(midSup)
+
+        if not f_sameLine(x1, y1, x2, y2, mainSup)
+            midSup := line.new(x1, y1, x2, y2, extend=extend.right, color=midSupColor, width=midSupWidth, style=f_style(midSupStyleOpt))
+
+    startHorizontal = math.max(0, array.size(lP) - midPivots)
+    [hx, hy, ht] = f_findHorizontalSupport(lP, lB, startHorizontal, hSupMinTouch)
+    hSupT := ht
+
+    if showHorizontalSup and hx >= 0 and not na(hy)
+        if not na(hSup)
+            line.delete(hSup)
+
+        hSup := line.new(hx, hy, bar_index, hy, extend=extend.right, color=hSupColor, width=hSupWidth, style=f_style(hSupStyleOpt))
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// SINYALLER
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+mainResNow = not na(mainRes) ? line.get_price(mainRes, bar_index) : na
+mainResPrev = not na(mainRes) ? line.get_price(mainRes, bar_index - 1) : na
+midResNow = not na(midRes) ? line.get_price(midRes, bar_index) : na
+midResPrev = not na(midRes) ? line.get_price(midRes, bar_index - 1) : na
+
+mainSupNow = not na(mainSup) ? line.get_price(mainSup, bar_index) : na
+midSupNow = not na(midSup) ? line.get_price(midSup, bar_index) : na
+hSupNow = not na(hSup) ? line.get_price(hSup, bar_index) : na
+
+// 1 numarali nokta daima cizginin guncel bar izdüsümüdür; pivot olmasi gerekmez.
+if barstate.islast
+    if not na(mainResNowLabel)
+        label.delete(mainResNowLabel)
+    if not na(mainSupNowLabel)
+        label.delete(mainSupNowLabel)
+    if not na(mainResNow)
+        mainResNowLabel := label.new(bar_index, mainResNow, "1", style=label.style_none, textcolor=mainResColor, size=size.small)
+    if not na(mainSupNow)
+        mainSupNowLabel := label.new(bar_index, mainSupNow, "1", style=label.style_none, textcolor=mainSupColor, size=size.small)
+
+mainBreak = f_breakPct(mainResNow)
+midBreak = f_breakPct(midResNow)
+mainSellBreak = f_breakDownPct(mainSupNow)
+midSellBreak = f_breakDownPct(midSupNow)
+
+mainBreakEvent = not na(mainResNow) and not na(mainResPrev) and close > mainResNow and close[1] <= mainResPrev
+midBreakEvent = not na(midResNow) and not na(midResPrev) and close > midResNow and close[1] <= midResPrev
+mainBreakAge = ta.barssince(mainBreakEvent)
+midBreakAge = ta.barssince(midBreakEvent)
+mainBreakRecent = not na(mainBreakAge) and mainBreakAge <= trendBreakConfirmBars
+midBreakRecent = not na(midBreakAge) and midBreakAge <= trendBreakConfirmBars
+mainBuy = showBuy and baseBuyOk and not na(mainResNow) and close > mainResNow and mainBreakRecent and mainBreak >= minBreakPct
+midBuy = showBuy and baseBuyOk and not mainBuy and not na(midResNow) and close > midResNow and midBreakRecent and midBreak >= minBreakPct
+starMainBuy = mainBuy and bbSqueezeBefore
+starMidBuy = midBuy and bbSqueezeBefore
+
+mainSellEvent = not na(mainSupNow) and close < mainSupNow and close[1] >= nz(mainSupNow[1], mainSupNow)
+midSellEvent = not na(midSupNow) and close < midSupNow and close[1] >= nz(midSupNow[1], midSupNow)
+mainSellAge = ta.barssince(mainSellEvent)
+midSellAge = ta.barssince(midSellEvent)
+mainSellRecent = not na(mainSellAge) and mainSellAge <= trendBreakConfirmBars
+midSellRecent = not na(midSellAge) and midSellAge <= trendBreakConfirmBars
+mainSell = showSell and baseSellOk and not na(mainSupNow) and close < mainSupNow and mainSellRecent and mainSellBreak >= minBreakPct
+midSell = showSell and baseSellOk and not mainSell and not na(midSupNow) and close < midSupNow and midSellRecent and midSellBreak >= minBreakPct
+
+momentumBreak = ta.barssince(mainBuy or midBuy) <= momentumLookback
+
+belowMain = not na(mainSupNow) and close < mainSupNow
+belowMid = not na(midSupNow) and close < midSupNow
+belowHorizontal = not na(hSupNow) and close < hSupNow
+
+plotshape(mainBuy and not starMainBuy and not ema20Above, title="ANA BUY", location=location.belowbar, style=shape.labelup, text="ANA BUY", color=buyColor, textcolor=buyTextColor, size=size.normal)
+plotshape(mainBuy and not starMainBuy and ema20Above, title="ANA BUY EMA20 USTU", location=location.belowbar, style=shape.labelup, text="ANA BUY\nEMA20 ÜSTÜ", color=buyColor, textcolor=buyTextColor, size=size.normal)
+plotshape(midBuy and not starMidBuy and not ema20Above, title="ARA BUY", location=location.belowbar, style=shape.labelup, text="ARA BUY", color=color.new(buyColor, 10), textcolor=buyTextColor, size=size.small)
+plotshape(midBuy and not starMidBuy and ema20Above, title="ARA BUY EMA20 USTU", location=location.belowbar, style=shape.labelup, text="ARA BUY\nEMA20 ÜSTÜ", color=color.new(buyColor, 10), textcolor=buyTextColor, size=size.small)
+plotshape(starMainBuy, title="YILDIZ ANA BUY", location=location.belowbar, style=shape.labelup, text="★ ANA BUY", color=color.yellow, textcolor=color.black, size=size.normal)
+plotshape(starMidBuy, title="YILDIZ ARA BUY", location=location.belowbar, style=shape.labelup, text="★ ARA BUY", color=color.yellow, textcolor=color.black, size=size.normal)
+plotshape(mainSell and ema20Below, title="ANA SELL", location=location.abovebar, style=shape.labeldown, text="ANA SELL\nEMA20 ALTI", color=sellColor, textcolor=sellTextColor, size=size.normal)
+plotshape(mainSell and not ema20Below, title="ANA SELL EMA20 USTU", location=location.abovebar, style=shape.labeldown, text="ANA SELL", color=sellColor, textcolor=sellTextColor, size=size.normal)
+plotshape(midSell and ema20Below, title="ARA SELL", location=location.abovebar, style=shape.labeldown, text="ARA SELL\nEMA20 ALTI", color=color.new(sellColor, 10), textcolor=sellTextColor, size=size.small)
+plotshape(midSell and not ema20Below, title="ARA SELL EMA20 USTU", location=location.abovebar, style=shape.labeldown, text="ARA SELL", color=color.new(sellColor, 10), textcolor=sellTextColor, size=size.small)
+
+bgcolor(mainBuy ? color.new(color.lime, 88) : midBuy ? color.new(color.green, 92) : mainSell ? color.new(color.red, 88) : midSell ? color.new(color.maroon, 92) : na)
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// PANEL
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+var table dash = table.new(f_dashPos(dashPosOpt), 2, 15, bgcolor=color.new(color.black, 20), border_width=1)
+
+if showDash and barstate.islast
+    table.cell(dash, 0, 0, "Ana Direnc", text_color=color.white, text_size=dashTextSize)
+    table.cell(dash, 1, 0, str.tostring(mainResT) + "T", text_color=mainResColor, text_size=dashTextSize)
+
+    table.cell(dash, 0, 1, "Ana Destek", text_color=color.white, text_size=dashTextSize)
+    table.cell(dash, 1, 1, str.tostring(mainSupT) + "T", text_color=mainSupColor, text_size=dashTextSize)
+
+    table.cell(dash, 0, 2, "Ara Direnc", text_color=color.white, text_size=dashTextSize)
+    table.cell(dash, 1, 2, str.tostring(midResT) + "T", text_color=midResColor, text_size=dashTextSize)
+
+    table.cell(dash, 0, 3, "Ara Destek", text_color=color.white, text_size=dashTextSize)
+    table.cell(dash, 1, 3, str.tostring(midSupT) + "T", text_color=midSupColor, text_size=dashTextSize)
+
+    table.cell(dash, 0, 4, "Yatay Destek", text_color=color.white, text_size=dashTextSize)
+    table.cell(dash, 1, 4, str.tostring(hSupT) + "T", text_color=hSupColor, text_size=dashTextSize)
+
+    table.cell(dash, 0, 5, "Govde %", text_color=color.white, text_size=dashTextSize)
+    table.cell(dash, 1, 5, str.tostring(math.round(bodyPct, 1)), text_color=bodyOk ? color.lime : color.orange, text_size=dashTextSize)
+
+    table.cell(dash, 0, 6, "Ust Igne %", text_color=color.white, text_size=dashTextSize)
+    table.cell(dash, 1, 6, str.tostring(math.round(upperPct, 1)), text_color=color.yellow, text_size=dashTextSize)
+
+    table.cell(dash, 0, 7, "Alt Igne %", text_color=color.white, text_size=dashTextSize)
+    table.cell(dash, 1, 7, str.tostring(math.round(lowerPct, 1)), text_color=color.yellow, text_size=dashTextSize)
+
+    table.cell(dash, 0, 8, "15M MACD 0X", text_color=color.white, text_size=dashTextSize)
+    table.cell(dash, 1, 8, macd15Cross0 ? "VAR" : "-", text_color=macd15Cross0 ? color.lime : color.gray, text_size=dashTextSize)
+
+    table.cell(dash, 0, 9, "1H MACD 0X", text_color=color.white, text_size=dashTextSize)
+    table.cell(dash, 1, 9, macd1hCross0 ? "VAR" : "-", text_color=macd1hCross0 ? color.lime : color.gray, text_size=dashTextSize)
+
+    table.cell(dash, 0, 10, "1H MACD > 0", text_color=color.white, text_size=dashTextSize)
+    table.cell(dash, 1, 10, macd1hAbove0 ? "EVET" : "HAYIR", text_color=macd1hAbove0 ? color.lime : color.red, text_size=dashTextSize)
+
+    table.cell(dash, 0, 11, "4H MACD > 0", text_color=color.white, text_size=dashTextSize)
+    table.cell(dash, 1, 11, macd4hAbove0 ? "EVET" : "HAYIR", text_color=macd4hAbove0 ? color.lime : color.red, text_size=dashTextSize)
+
+    table.cell(dash, 0, 12, "Momentum", text_color=color.white, text_size=dashTextSize)
+    table.cell(dash, 1, 12, momentumBreak ? "KIRILIM" : "-", text_color=momentumBreak ? color.lime : color.gray, text_size=dashTextSize)
+
+    table.cell(dash, 0, 13, "Destek Alti", text_color=color.white, text_size=dashTextSize)
+    supportTxt = belowMain ? "ANA" : belowMid ? "ARA" : belowHorizontal ? "YATAY" : "-"
+    supportCol = belowMain or belowMid or belowHorizontal ? color.red : color.gray
+    table.cell(dash, 1, 13, supportTxt, text_color=supportCol, text_size=dashTextSize)
+
+    sig = mainBuy ? "ANA BUY" : midBuy ? "ARA BUY" : mainSell ? "ANA SELL" : midSell ? "ARA SELL" : "-"
+    sigColor = mainBuy or midBuy ? color.lime : mainSell or midSell ? color.red : color.gray
+    table.cell(dash, 0, 14, "Sinyal", text_color=color.white, text_size=dashTextSize)
+    table.cell(dash, 1, 14, sig, text_color=sigColor, text_size=dashTextSize)
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ALERTLER
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+alertcondition(mainBuy, title="ANA BUY", message="ANA BUY - {{ticker}} {{close}}")
+alertcondition(midBuy, title="ARA BUY", message="ARA BUY - {{ticker}} {{close}}")
+alertcondition(starMainBuy, title="YILDIZ ANA BUY", message="★ ANA BUY - BB DARALMASI - {{ticker}} {{close}}")
+alertcondition(starMidBuy, title="YILDIZ ARA BUY", message="★ ARA BUY - BB DARALMASI - {{ticker}} {{close}}")
+alertcondition(mainBuy and ema20Above, title="ANA BUY EMA20 USTU", message="ANA BUY - EMA5/9 KESISTI - EMA20 USTU - {{ticker}} {{close}}")
+alertcondition(midBuy and ema20Above, title="ARA BUY EMA20 USTU", message="ARA BUY - EMA5/9 KESISTI - EMA20 USTU - {{ticker}} {{close}}")
+alertcondition(mainSell, title="ANA SELL", message="ANA SELL - MACD 11/24/7 ASAGI KESISIM - RSI 50 ALTI - HACIM SMA20 x1.5 - {{ticker}} {{close}}")
+alertcondition(midSell, title="ARA SELL", message="ARA SELL - MACD 11/24/7 ASAGI KESISIM - RSI 50 ALTI - HACIM SMA20 x1.5 - {{ticker}} {{close}}")
+alertcondition(momentumBreak, title="Momentum Trend Kirilimi", message="Momentum trend kirilimi var - {{ticker}} {{close}}")
+alertcondition(belowMain, title="Ana Destek Alti", message="Ana destek altina indi - {{ticker}} {{close}}")
+alertcondition(belowMid, title="Ara Destek Alti", message="Ara destek altina indi - {{ticker}} {{close}}")
+alertcondition(belowHorizontal, title="Yatay Destek Alti", message="Yatay destek altina indi - {{ticker}} {{close}}")

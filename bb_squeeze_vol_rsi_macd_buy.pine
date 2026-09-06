@@ -1,0 +1,37 @@
+//@version=6
+indicator("BB Squeeze + Hacim + RSI MACD BUY", shorttitle="BB SQZ BUY", overlay=true)
+
+bbLength = input.int(20, "BB uzunluğu", group="Bollinger")
+bbMult = input.float(2, "BB çarpanı", group="Bollinger")
+kcLength = input.int(20, "KC uzunluğu", group="Squeeze")
+kcMult = input.float(1.5, "KC çarpanı", group="Squeeze")
+volLength = input.int(20, "Hacim SMA", group="Hacim")
+volMult = input.float(1.5, "Önceki hacim çarpanı", group="Hacim")
+requireRsiMacd = input.bool(true, "RSI ve MACD teyidi zorunlu", group="Teyit")
+
+[bbMid, bbUpper, bbLower] = ta.bb(close, bbLength, bbMult)
+kcMid = ta.sma(close, kcLength)
+kcRange = ta.sma(ta.tr(true), kcLength)
+kcUpper = kcMid + kcRange * kcMult
+kcLower = kcMid - kcRange * kcMult
+squeeze = bbLower > kcLower and bbUpper < kcUpper
+hadSqueeze = ta.barssince(squeeze) <= 10
+
+highestH = ta.highest(high, kcLength)
+lowestL = ta.lowest(low, kcLength)
+momentum = ta.linreg(close - (kcMid + (highestH + lowestL) / 2) / 2, kcLength, 0)
+momentumGreen = momentum > 0 and momentum > momentum[1]
+volSma = ta.sma(volume, volLength)
+volumeOk = volume > volSma and volume > volume[1] * volMult
+
+rsi = ta.rsi(close, 14)
+[macdLine, macdSignal, macdHist] = ta.macd(close, 12, 26, 9)
+rsiMacdOk = rsi > 50 and macdHist > 0 and macdHist > macdHist[1]
+buy = ta.crossover(close, bbUpper) and hadSqueeze and momentumGreen and volumeOk and (not requireRsiMacd or rsiMacdOk)
+
+plot(bbUpper, "BB üst", color=color.blue)
+plot(bbMid, "BB orta", color=color.gray)
+plot(bbLower, "BB alt", color=color.blue)
+bgcolor(squeeze ? color.new(color.orange, 85) : na, title="Sıkışma")
+plotshape(buy, title="BUY", text="BUY", style=shape.labelup, location=location.belowbar, color=color.green, textcolor=color.white)
+alertcondition(buy, "BB Squeeze Hacim BUY", "{{ticker}} {{interval}}: BB squeeze sonrası hacim onaylı BUY. Kapanış={{close}}")
