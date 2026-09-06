@@ -1,0 +1,50 @@
+import ccxt
+import pandas as pd
+import pandas_ta as ta
+import json
+from datetime import datetime
+
+def check_rsi_divergence():
+    exchange = ccxt.binance({'enableRateLimit': True})
+    markets = exchange.load_markets()
+    
+    # Binance USDT Futures çiftleri
+    symbols = [m for m in markets if m.endswith('/USDT') and markets[m]['swap']]
+    
+    results = []
+
+    for symbol in symbols:
+        try:
+            ohlcv = exchange.fetch_ohlcv(symbol, timeframe='1d', limit=100)
+            if len(ohlcv) < 50:
+                continue
+                
+            df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+            df['rsi'] = ta.rsi(df['close'], length=14)
+            
+            curr = df.iloc[-1]
+            
+            # Son 10 gün içinde RSI 30'un altına inmiş ve şu an 30 seviyesinin üzerine çıkmış mı?
+            lowest_rsi_recent = df['rsi'].tail(10).min()
+            
+            if lowest_rsi_recent < 30 and curr['rsi'] >= 30:
+                min_price_idx = df['low'].tail(10).idxmin()
+                min_rsi_idx = df['rsi'].tail(10).idxmin()
+                
+                # Pozitif Uyumsuzluk Kontrolü
+                if min_price_idx > min_rsi_idx and curr['rsi'] > df.loc[min_rsi_idx, 'rsi']:
+                    results.append({
+                        'symbol': symbol,
+                        'current_rsi': round(float(curr['rsi']), 2),
+                        'lowest_rsi': round(float(lowest_rsi_recent), 2),
+                        'close_price': float(curr['close']),
+                        'updated_at': datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
+                    })
+        except Exception:
+            continue
+
+    with open('signals.json', 'w', encoding='utf-8') as f:
+        json.dump(results, f, indent=4, ensure_ascii=False)
+
+if __name__ == '__main__':
+    check_rsi_divergence()
