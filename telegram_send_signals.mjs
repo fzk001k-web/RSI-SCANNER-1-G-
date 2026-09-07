@@ -15,7 +15,7 @@ for (const signal of report.signals ?? []) {
   const png = await sharp(svg).png().toBuffer();
   const form = new FormData();
   form.append('chat_id', chatId);
-  form.append('caption', `⭐ ${signal.name} 4S BUY\nParite: ${signal.symbol}\nSistem: BB Squeeze + Hacim + RSI/MACD`);
+  form.append('caption', `⭐ ${signal.name} · 4S BUY\nParite: ${signal.symbol}\nSistem: ${(signal.types ?? ['BB Squeeze BUY']).join(' + ')}`);
   form.append('photo', new Blob([png], { type: 'image/png' }), signal.image.replace(/\.svg$/, '.png'));
   const response = await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, { method: 'POST', body: form });
   if (!response.ok) throw new Error(`Telegram gönderimi başarısız: ${response.status}`);
