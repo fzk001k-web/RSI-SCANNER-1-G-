@@ -1,0 +1,30 @@
+name: 4S Binance ve Bybit Sinyal Taraması
+
+on:
+  schedule:
+    - cron: "8 0,4,8,12,16,20 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan-and-notify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Kodu al
+        uses: actions/checkout@v4
+      - name: Node kur
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Görsel bağımlılığını kur
+        run: npm install --omit=dev
+      - name: Binance Spot ve Bybit Futures 4S taraması
+        run: node bb_squeeze_buy_scanner.mjs
+      - name: Sinyalleri Telegram'a görselli gönder
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: node telegram_send_signals.mjs
